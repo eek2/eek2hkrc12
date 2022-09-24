@@ -3,7 +3,9 @@ const csv = require("fast-csv");
 const fs = require("fs");
 const { format } = require('@fast-csv/format');
 const AES = require("crypto-js/aes");
-var CryptoJS = require("crypto-js");
+const hmac = require("crypto-js/hmac-sha256");
+const CryptoJS = require("crypto-js");
+const bcrypt = require('bcrypt');
 
 let port = parseInt(process.argv[2]) || 3000;
 
@@ -83,28 +85,34 @@ app.post("/clientHistory", (req, res) => {
 
     let cipherKey = social + bday;
     
-    console.log(cipherKey);
+    // console.log(cipherKey);
 
     let toHash = firstName+"_"+lastName;
 
-    let clientHash = AES.encrypt(toHash, cipherKey).toString();
-    let clientHash2 = AES.encrypt(toHash, cipherKey).toString();
-    console.log("testing similarity")
-    console.log(clientHash);
-    console.log(clientHash2);
+    let clientHash = hmac(toHash, cipherKey).toString();
+
     // let bytes = AES.decrypt(clientHash, cipherKey);
 
     // console.log(bytes.toString(CryptoJS.enc.Utf8));
     
     console.log(clientHash);
-
+    let toSend = []
     if (dataMap.has(clientHash)) {
         let dat = dataMap.get(clientHash);
-        let bytes = AES.decrypt(dat, clientHash);
-        res.send(bytes.toString(CryptoJS.enc.Utf8));
-    } else {
-        res.send([]);
+        for (let entry of dat) {
+            console.log(entry)
+            let bytes = AES.decrypt(entry, cipherKey);
+            toSend.push(eval(bytes.toString(CryptoJS.enc.Utf8)));
+        }
+
+        // console.log(dat);
+        // let bytes = AES.decrypt(dat[0], cipherKey);
+        // console.log(bytes)
+        // let toSend = eval(bytes.toString(CryptoJS.enc.Utf8)); //IF the data is an object, but for simplicity im making the data only a string
+        // console.log(toSend);
+        // res.send(toSend);
     }
+    res.send(toSend);
 
     // console.log(clientHash);
     // console.log(AES.decrypt(Array.from(dataMap.keys())[0], clientHash).toString());
@@ -129,7 +137,7 @@ app.post("/addClientHistory", (req, res) => {
 
     let cipherKey = social + bday; 
 
-    let clientHash = AES.encrypt(firstName+"_"+lastName, cipherKey).toString();
+    let clientHash = hmac(firstName+"_"+lastName, cipherKey).toString();
     let dataHash = AES.encrypt(JSON.stringify(data), cipherKey).toString();
 
     addClientData(clientHash, dataHash);    
