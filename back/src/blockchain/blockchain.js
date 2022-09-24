@@ -3,16 +3,26 @@ const axios = require("axios");
 let peers = [];
 let key = process.env.KEY;
 let myip;
-const options = {headers: {"Content-Type": "application/json"}}
+let myport;
+
 const default_peer = 'http://localhost:3000'
+
 const addpeerPost = (req, res) => {
-    console.log(req.socket.remoteAddress)
-    console.log(req.socket.address)
-    console.log(req.socket.localPort);
-    console.log(req.socket.remotePort);
-    console.log(req.body.myip);
-    // console.log(req);
+    const new_peer = req.body.myip;
     res.sendStatus(200);
+    if (!peers.includes(new_peer)) {
+        peers.push(new_peer);
+    }
+}
+
+const getChain = (req, res) => {
+    let auth = req.params.KEY;
+    if (auth == key) {
+        //send the blockchain ig lmao
+    } else {
+        res.sendStatus(401);
+    }
+
 }
 
 const connectPeerPost = async (req, res) => {
@@ -23,9 +33,10 @@ const connectPeerPost = async (req, res) => {
     res.sendStatus(200);
 }
 
-module.exports = (app, ip) => {
+module.exports = (app, ip, port) => {
     //app.get("/adsasd", func);
     app.post("/addpeer", addpeerPost);
     app.post("/connectpeer", connectPeerPost);
     myip = ip;
+    myport = port;
 }
