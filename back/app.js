@@ -9,11 +9,11 @@ const bcrypt = require('bcrypt');
 // import { v4 as uuidv4 } from 'uuid';
 // uuidv4();
 const crypto = require("crypto");
-
+const alarm = require('alarm');
 
 // console.log(crypto.randomBytes(32).toString("hex"));
 
-console.log(Date.now()); //GetUNIX
+// console.log(Date.now()); //GetUNIX
 
 let port = parseInt(process.argv[2]) || 3000;
 const selfip = "http://127.0.0.1" + ":" + port.toString()
@@ -26,6 +26,8 @@ const selfip = "http://127.0.0.1" + ":" + port.toString()
 // csvStream.write({ header1: 'row3-col1', header2: 'row3-col2' });
 // csvStream.write({ header1: 'row4-col1', header2: 'row4-col2' });
 // csvStream.end();
+
+const peerCount = 3;
 
 const dataMap = new Map();
 
@@ -74,6 +76,7 @@ let initializeMap = () => {
         let timestamp = row.timestamp
         let winhash = row.winhash
         let winsalt = row.winsalt
+        let source = row.source
         // console.log(row);
         for (let transaction of transactions) {
             let client = transaction.client;
@@ -93,15 +96,76 @@ let initializeMap = () => {
 
         bc.push(row);
     })
-    .on('end', rowCount => {console.log(`Initialized with ${rowCount} rows`)});  
+    .on('end', rowCount => {console.log(`Initialized with ${rowCount} rows`);});  
 }
 let unaddedTransactions = []; //Transactions to add to the next block.
 
 let rollHash = () => {
     let lastBlock = bc[bc.length - 1];
-    let newHeight = lastBlock.height + 1;
+    let oldWinHash = lastBlock.winhash;
+    let newHeight = parseInt(lastBlock.height) + 1;
     let timestamp = Date.now();
+    let salt = crypto.randomBytes(32).toString("hex");
+    let toHash = selfip + JSON.stringify(unaddedTransactions) + timestamp + newHeight + oldWinHash;
+    let attemptedWinnerHash = hmac(toHash, salt).toString();
+    // console.log(salt)
+    // console.log("inside roll")
+    // console.log(attemptedWinnerHash);
+    // console.log(attemptedWinnerHash.length);
+
+    let newAttemptedBlock = {
+        "height": newHeight,
+        "transactions": JSON.stringify(unaddedTransactions),
+        "tid": hmac(attemptedWinnerHash, oldWinHash).toString(), //new target hash is new hash hashed by old hash
+        "timestamp": timestamp,
+        "winhash": attemptedWinnerHash,
+        "winsalt": salt,
+        "source": selfip
+    }
+    unaddedTransactions = []; //clear here
+    checkBlock(newAttemptedBlock);
+    return (newAttemptedBlock);
 }
+
+let nextConsensusTime = () => {
+    let now = new Date();
+    now.setUTCSeconds(0);
+    now.setUTCMilliseconds(0);
+    // now = new Date(now + 3600 * 1000 * (2 - now.getUTCMinutes()%2))
+    // console.log(now.toUTCString());
+    // console.log(now)
+    now = new Date(now.valueOf() + (60 * 1000) * ((2 - now.getUTCMinutes()%2))); //should be 60 * 1000
+    // console.log(now.toUTCString());
+    return now;
+}
+
+let checkBlock = (block) => {
+    let lastBlock = bc[bc.length - 1];
+    let oldWinHash = lastBlock.winhash;
+    let new_transactions = eval(block.transactions)
+    let toHash = block.source + JSON.stringify(new_transactions) + block.timestamp + block.height + oldWinHash;
+    if (block.winhash == (hmac(toHash, block.winsalt).toString())) {
+        let lastTarget = lastBlock.tid;
+        let totalDistance = 0;
+        for(let i = 0; i < lastTarget.length; i++) {
+            totalDistance += Math.abs(lastTarget.charCodeAt(i) - block.winhash.charCodeAt(i));
+        }
+        console.log(totalDistance);
+        return (totalDistance)
+    } else {
+        return(-1)
+    }
+}
+
+// nextConsensusTime();
+
+//  New block process
+//1.) Each nodes creates their block to win
+//2.) Wait till send time and send blocks to each other
+//3.) Then each person sends their votes to each other
+//4.) Then they write the blocks down
+
+
 
 let addTransaction = (transaction) => {
     let timestamp = transaction.timestamp;
@@ -124,7 +188,21 @@ let addTransaction = (transaction) => {
     // stream.end();
 }
 
+let currentNomin = new Map();
+let currentBestDistance = -1;
+let currentNominCount = 0;
 
+let writeBlock = (block) => {
+    currentNomin = new Map(); //reset nominee stuff.
+    currentBestDistance = -1;
+    currentNominCount = 0;
+    bc.push(block);
+    const stream = format({ headers:false , includeEndRowDelimiter: true });
+    const csvFile = fs.createWriteStream(fileName, { flags: 'a'});
+    stream.pipe(csvFile);
+    stream.write({"height": block.height, "transactions": block.transactions, "tid": block.tid, "timestamp": block.timestamp, "winhash": block.winhash, "winsalt": block.winsalt, "source": block.source});
+    stream.end();
+}
 
 initializeMap();
 
@@ -134,10 +212,81 @@ const app = express();
 app.use(express.urlencoded({extended: true}));
 app.use(express.json());
 
+let sendtoPeers; //define before usage
+let sendVote;
+let sendBlock;
+
+let getBlock = (block, source) => {
+    console.log("got block from " + source)
+    let similarity = checkBlock(block);
+    currentNomin.set(block, {"source": source, "similarity": similarity});
+    currentNominCount++;
+    if (similarity > 0) {
+        if (currentBestDistance == -1) {
+            currentBestDistance = similarity;
+        } else if (currentBestDistance < similarity) {
+            currentBestDistance = similarity;
+        }
+    }
+    if (currentNominCount == peerCount) {
+        //vote
+        let toVoteFor;
+        let similarity = -1;
+        currentNomin.forEach((value, key) => {
+            if (similarity == -1) {
+                toVoteFor = value.source;
+                similarity = value.similarity;
+            } else if (similarity > value.similarity) {
+                toVoteFor = value.source;
+                similarity = value.similarity;
+            }
+        });
+        console.log("voted for " + toVoteFor);
+        sendVote(toVoteFor);
+        getVote(toVoteFor, selfip);
+    }
+}
+
+let votes = new Map();
+let voteCount = 0;
+let getVote = (vote, source) => {
+    voteCount++;
+    console.log("got vote for " + vote + " from " + source)
+    if (votes.has(vote)) {
+        votes.set(vote, votes.get(vote) + 1)
+    } else {
+        votes.set(vote, 1);
+    }
+    if (voteCount == peerCount) {
+        
+        let maxSource = -1;
+        let maxCount = -1;
+        votes.forEach((value, key) => { //Find the block with the most votes
+            if (maxSource == -1) {
+                maxSource = key
+                maxCount = value
+            } else if (maxCount < value){
+                maxSource = key
+                maxCount = value;
+            }
+        });
+        let block;
+        console.log(`${port} decided on ${maxSource}`)
+        currentNomin.forEach((value, key) => { //get best block;
+            if (value.source == maxSource) {
+                block = key;
+            }
+        })
+        writeBlock(block);
+        votes = new Map();
+        voteCount = 0;
+    }
+}
+
 
 let giveChain = () => {return bc};
 
-let sendtoPeers = blockchain(app, "http://127.0.0.1" + ":" + port.toString(), port, addTransaction, giveChain);
+[sendtoPeers, sendBlock, sendVote] = blockchain(app, "http://127.0.0.1" + ":" + port.toString(), port, addTransaction, giveChain, getBlock, getVote);
 
 let addClientData = (client, data) => {
     let timestamp = Date.now();
@@ -155,6 +304,8 @@ let addClientData = (client, data) => {
     // stream.pipe(csvFile);
     // stream.write({"client": client, "data": data, "height": 1});
     // stream.end();
+    let toAddToTransactions = {"client": client, "data": data, "timestamp": timestamp, "source": selfip};
+    unaddedTransactions.push(toAddToTransactions);
 }
 
 
@@ -184,8 +335,9 @@ app.post("/clientHistory", (req, res) => {
         let dat = dataMap.get(clientHash);
         for (let entry of dat) {
             console.log(entry)
-            let bytes = AES.decrypt(entry, cipherKey);
-            toSend.push(eval(bytes.toString(CryptoJS.enc.Utf8)));
+            let bytes = AES.decrypt(entry.data, cipherKey);
+            let decrypted = eval(bytes.toString(CryptoJS.enc.Utf8));
+            toSend.push({"data": decrypted, "source": entry.source, "timestamp": entry.timestamp});
         }
 
         // console.log(dat);
@@ -227,3 +379,25 @@ app.post("/addClientHistory", (req, res) => {
 app.listen(port, () => {
     console.log(`Server started on port ${port}`);
 });
+
+let consensusStart = () => {
+    let attemptedBlock = rollHash();
+    sendBlock(attemptedBlock);
+    getBlock(attemptedBlock, selfip);
+    // writeBlock(attemptedBlock);
+}
+
+
+let setAlarm = () => { //Recurring consensus alarm
+    alarm(nextConsensusTime(), function() {
+        console.log("alarm")
+        console.log((new Date()).toUTCString());
+        consensusStart();
+        setTimeout(() => { //reset the alarm
+            setAlarm();
+          }, "5000")
+    });
+
+}
+
+setAlarm();

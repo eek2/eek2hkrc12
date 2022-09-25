@@ -7,6 +7,8 @@ let myip;
 let myport;
 let giveTrans;
 let gChain;
+let giveBlock;
+let giveVote;
 const default_peer = 'http://localhost:3000'
 
 const addPeerPost = (req, res) => {
@@ -45,24 +47,69 @@ const connectPeerPost = async (req, res) => {
     res.sendStatus(200);
 }
 
-const sendToPeers = (clientHash, dataHash) => {
+const getBlockNomination = (req, res) => {
+    const block = req.body.block;
+    const source = req.body.source;
+    console.log("got nomination")
+    giveBlock(block, source);
+    res.sendStatus(200);
+}
+
+const getBCVote = (req, res) => {
+    let vote = req.body.vote;
+    let source = req.body.source;
+    // console.log("gotVote");
+    giveVote(vote, source);
+    res.sendStatus(200);
+}
+
+const sendToPeers = (clientHash, dataHash, timestamp, source) => {
     if (peers.length > 0) {
         for (let peer of peers) {
-            let payload = {"client": clientHash, "data": dataHash};
+            let payload = {"client": clientHash, "data": dataHash, "timestamp": timestamp, "source": source};
             axios.post(peer + "/addTransaction", payload).then((response)=> {console.log("Transaction sent to " + peer)}, (error) => {console.log("Couldnt send to " + peer)});
         }
     }
 }
+const sendBlock = (block) => {
+    if (peers.length > 0) {
+        for (let peer of peers) {
+            let payload = {"block": block, "source": myip};
+            axios.post(peer + "/blocknomination", payload).then((response)=> {console.log("Block sent to " + peer)}, (error) => {console.log("Couldnt send to " + peer)});
+        }
+    }
+}
+const sendVote = (vote) => {
+    if (peers.length > 0) {
+        for (let peer of peers) {
+            let payload = {"vote": vote, "source": myip};
+            axios.post(peer + "/getBCVote", payload).then((response)=> {console.log("Vote sent to " + peer)}, (error) => {console.log("Couldnt send to " + peer)});
+        }
+    }
+}
 
-module.exports = (app, ip, port, giveTransactionData, getBc) => {
+module.exports = (app, ip, port, giveTransactionData, getBc, gvBlock, gvVote) => {
     //app.get("/adsasd", func);
     app.post("/addpeer", addPeerPost);
     app.post("/connectpeer", connectPeerPost);
     app.post("/addTransaction", addTransactionPost);
     app.post("/getChain", getChainPost);
+    app.post("/blocknomination", getBlockNomination);
+    app.post("/getBCVote", getBCVote);
     myip = ip;
     myport = port;
+
+    if (port == 3000) {
+        peers = ["http://127.0.0.1:3001", "http://127.0.0.1:3002"]
+    } else if (port == 3001) {
+        peers = ["http://127.0.0.1:3000", "http://127.0.0.1:3002"]
+    } else if (port == 3002) {
+        peers = ["http://127.0.0.1:3001", "http://127.0.0.1:3000"]
+    }
+
     giveTrans = giveTransactionData;
     gChain = getBc;
-    return sendToPeers;
+    giveBlock = gvBlock;
+    giveVote = gvVote;
+    return [sendToPeers, sendBlock, sendVote];
 }
