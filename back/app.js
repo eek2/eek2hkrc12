@@ -6,13 +6,17 @@ const AES = require("crypto-js/aes");
 const hmac = require("crypto-js/hmac-sha256");
 const CryptoJS = require("crypto-js");
 const bcrypt = require('bcrypt');
-import { v4 as uuidv4 } from 'uuid';
+// import { v4 as uuidv4 } from 'uuid';
 // uuidv4();
+const crypto = require("crypto");
 
 
+// console.log(crypto.randomBytes(32).toString("hex"));
+
+console.log(Date.now()); //GetUNIX
 
 let port = parseInt(process.argv[2]) || 3000;
-
+const selfip = "http://127.0.0.1" + ":" + port.toString()
 // const csvStream = csv.format({headers: true});
 
 // csvStream.pipe(process.stdout).on("end", () => process.exit());
@@ -25,6 +29,7 @@ let port = parseInt(process.argv[2]) || 3000;
 
 const dataMap = new Map();
 
+let bc = [];
 
 const fileName = `./data/${port}/bc.csv`;
 
@@ -37,23 +42,87 @@ const fileName = `./data/${port}/bc.csv`;
 // stream.end();
 //Append ending
 
+let currentheight;
+
+// let initializeMap = () => {
+//     fs.createReadStream(fileName)
+//     .pipe(csv.parse({ headers: true }))
+//     .on('error', error => console.error(error))
+//     .on('data', row => {
+//         client = row.client;
+//         data = row.data;
+//         if (dataMap.has(client)) { //client with history
+//             let arr = dataMap.get(client);
+//             arr.push(data);
+//             dataMap.set(client, arr);
+//         } else {
+//             dataMap.set(client, [data]); //client without history
+//         }
+//     })
+//     .on('end', rowCount => {console.log(`Initialized with ${rowCount} rows`)});  
+// }
+
+//Readining bc.csv, filling the data hashmap
 let initializeMap = () => {
     fs.createReadStream(fileName)
     .pipe(csv.parse({ headers: true }))
     .on('error', error => console.error(error))
     .on('data', row => {
-        client = row.client;
-        data = row.data;
-        if (dataMap.has(client)) { //client with history
-            let arr = dataMap.get(client);
-            arr.push(data);
-            dataMap.set(client, arr);
-        } else {
-            dataMap.set(client, [data]); //client without history
+        let currentheight = row.height;
+        let transactions = eval(row.transactions)
+        let targetID = row.tid;
+        let timestamp = row.timestamp
+        let winhash = row.winhash
+        let winsalt = row.winsalt
+        // console.log(row);
+        for (let transaction of transactions) {
+            let client = transaction.client;
+            let data = transaction.data;
+            let source = transaction.source;
+            // let uuid = transaction.uuid;
+            let trans_timestamp = transaction.timestamp;
+            let toAdd = {"data": data, "timestamp": trans_timestamp, "source": source};
+            if (dataMap.has(client)) { //client with history
+                let arr = dataMap.get(client);
+                arr.push(toAdd);
+                dataMap.set(client, arr);
+            } else {
+                dataMap.set(client, [toAdd]); //client without history
+            }
         }
+
+        bc.push(row);
     })
     .on('end', rowCount => {console.log(`Initialized with ${rowCount} rows`)});  
-} 
+}
+let unaddedTransactions = []; //Transactions to add to the next block.
+
+let rollHash = () => {
+    let lastBlock = bc[bc.length - 1];
+    let newHeight = lastBlock.height + 1;
+    let timestamp = Date.now();
+}
+
+let addTransaction = (transaction) => {
+    let timestamp = transaction.timestamp;
+    let client = transaction.client;
+    let data = transaction.data;
+    let source = transaction.source;
+    let toAdd = {"data": data, "timestamp": timestamp, "source": source};
+    if (dataMap.has(client)) {
+        let arr = dataMap.get(client);
+        arr.push(toAdd);
+        dataMap.set(client, arr);
+    } else {
+        dataMap.set(client, [toAdd]);
+    }
+    unaddedTransactions.push(transaction);
+    // const stream = format({ headers:false , includeEndRowDelimiter: true });
+    // const csvFile = fs.createWriteStream(fileName, { flags: 'a'});
+    // stream.pipe(csvFile);
+    // stream.write({"client": client, "data": data, "height": 1});
+    // stream.end();
+}
 
 
 
@@ -65,38 +134,27 @@ const app = express();
 app.use(express.urlencoded({extended: true}));
 app.use(express.json());
 
-let sendtoPeers = blockchain(app, "http://127.0.0.1" + ":" + port.toString(), port);
 
+let giveChain = () => {return bc};
+
+let sendtoPeers = blockchain(app, "http://127.0.0.1" + ":" + port.toString(), port, addTransaction, giveChain);
 
 let addClientData = (client, data) => {
-    sendtoPeers(client, data);
+    let timestamp = Date.now();
+    sendtoPeers(client, data, timestamp, selfip);
+    let toAdd = {"data": data, "timestamp": timestamp, "source": selfip};
     if (dataMap.has(client)) {
         let arr = dataMap.get(client);
-        arr.push(data);
+        arr.push(toAdd);
         dataMap.set(client, arr);
     } else {
-        dataMap.set(client, [data]);
+        dataMap.set(client, [toAdd]);
     }
-    const stream = format({ headers:false , includeEndRowDelimiter: true });
-    const csvFile = fs.createWriteStream(fileName, { flags: 'a'});
-    stream.pipe(csvFile);
-    stream.write({"client": client, "data": data, "height": 1});
-    stream.end();
-}
-
-let addTransaction = (client, data) => {
-    if (dataMap.has(client)) {
-        let arr = dataMap.get(client);
-        arr.push(data);
-        dataMap.set(client, arr);
-    } else {
-        dataMap.set(client, [data]);
-    }
-    const stream = format({ headers:false , includeEndRowDelimiter: true });
-    const csvFile = fs.createWriteStream(fileName, { flags: 'a'});
-    stream.pipe(csvFile);
-    stream.write({"client": client, "data": data, "height": 1});
-    stream.end();
+    // const stream = format({ headers:false , includeEndRowDelimiter: true });
+    // const csvFile = fs.createWriteStream(fileName, { flags: 'a'});
+    // stream.pipe(csvFile);
+    // stream.write({"client": client, "data": data, "height": 1});
+    // stream.end();
 }
 
 
@@ -141,10 +199,6 @@ app.post("/clientHistory", (req, res) => {
 
     // console.log(clientHash);
     // console.log(AES.decrypt(Array.from(dataMap.keys())[0], clientHash).toString());
-
-
-    
-
 
     // console.log(dataMap.get(clientHash));
     // let dat = AES.decrypt(dataMap.get(clientHash), cipherKey);

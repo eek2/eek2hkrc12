@@ -1,3 +1,2 @@
-client,data,height
-edc5b633bc3188851ee863bc0db13cfd8ce8c2ed6a714d94ea4ad4a5a8c2568d,U2FsdGVkX18tiXWvh1mSJkGvqLaczW3YoG5T1+ggjEM=,1
-edc5b633bc3188851ee863bc0db13cfd8ce8c2ed6a714d94ea4ad4a5a8c2568d,U2FsdGVkX18/XHhCaCwSzMjVJDfgHgnkIUT40fKG1O8BgWuwaoxSfppSugMKu2eQ,1
+height,transactions,tid,timestamp,winhash,winsalt
+1,[],1,1664071551468,1,1
