@@ -30,10 +30,12 @@ const getChainPost = (req, res) => {
 }
 
 const addTransactionPost = (req, res) => {
+    
     const clientHash = req.body.client;
     const dataHash = req.body.data;
     const source = req.body.source;
     const timestamp = req.body.timestamp;
+    console.log("got transaction from " + source);
     giveTrans({"client": clientHash, "data": dataHash, "timestamp": timestamp, "source": source});
     res.sendStatus(200);
 }
