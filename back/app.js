@@ -6,6 +6,10 @@ const AES = require("crypto-js/aes");
 const hmac = require("crypto-js/hmac-sha256");
 const CryptoJS = require("crypto-js");
 const bcrypt = require('bcrypt');
+import { v4 as uuidv4 } from 'uuid';
+// uuidv4();
+
+
 
 let port = parseInt(process.argv[2]) || 3000;
 
@@ -51,7 +55,21 @@ let initializeMap = () => {
     .on('end', rowCount => {console.log(`Initialized with ${rowCount} rows`)});  
 } 
 
+
+
+initializeMap();
+
+let blockchain = require("./src/blockchain/blockchain");
+
+const app = express();
+app.use(express.urlencoded({extended: true}));
+app.use(express.json());
+
+let sendtoPeers = blockchain(app, "http://127.0.0.1" + ":" + port.toString(), port);
+
+
 let addClientData = (client, data) => {
+    sendtoPeers(client, data);
     if (dataMap.has(client)) {
         let arr = dataMap.get(client);
         arr.push(data);
@@ -66,15 +84,22 @@ let addClientData = (client, data) => {
     stream.end();
 }
 
-initializeMap();
+let addTransaction = (client, data) => {
+    if (dataMap.has(client)) {
+        let arr = dataMap.get(client);
+        arr.push(data);
+        dataMap.set(client, arr);
+    } else {
+        dataMap.set(client, [data]);
+    }
+    const stream = format({ headers:false , includeEndRowDelimiter: true });
+    const csvFile = fs.createWriteStream(fileName, { flags: 'a'});
+    stream.pipe(csvFile);
+    stream.write({"client": client, "data": data, "height": 1});
+    stream.end();
+}
 
-let blockchain = require("./src/blockchain/blockchain");
 
-const app = express();
-app.use(express.urlencoded({extended: true}));
-app.use(express.json());
-
-blockchain(app, "http://127.0.0.1" + ":" + port.toString(), port);
 
 //TODO authentication
 app.post("/clientHistory", (req, res) => {
